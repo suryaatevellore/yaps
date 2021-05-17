@@ -281,9 +281,8 @@ def write_to_archive_template(todos,
 
 def get_current_archived_todos(to_be_archived_todos,
                                notename=ARCHIVE_NOTE_NAME):
-    filename = f"{ARCHIVE_NOTE_DIR}/{notename}.md"
     # format these existing_todos by getting the open todos in archive
-    todos_in_archive = get_open_todos(filename)
+    todos_in_archive = get_open_todos(notename)
     print(f"Found {len(todos_in_archive)} todos in current archive..")
     return todos_in_archive
 
@@ -292,7 +291,7 @@ def deduplicate_todos(todos: List[Todo]):
     """Remove duplicates
     """
     dedup_todos = []
-    seen = {}
+    seen = set()
     for todo in todos:
         if todo.ID in seen:
             continue
