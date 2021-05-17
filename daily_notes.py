@@ -94,7 +94,9 @@ class Todo:
             shame_meter = ""
         shame_meter = len(self.shame) + 1
         if shame_meter > SHAME_THRESHOLD:
+            # No sense of putting shame on an archived todo
             self.action = Action.ARCHIVE
+            self.upcoming_shame = ""
         else:
             self.action = Action.SHAME
             self.upcoming_shame = SHAME_CHAR * shame_meter
@@ -158,9 +160,9 @@ def get_file_content(filename: str, directory=DN_DIR):
     return open(filename, "r+").read().rstrip()
 
 
-def find_pattern_in_file(filename, pattern):
+def find_pattern_in_file(filename, pattern, dir_path=None):
     matching_lines = []
-    note_text = get_file_content(filename)
+    note_text = get_file_content(filename, dir_path)
     for line in note_text.split("\n"):
         m = re.search(pattern, line)
         if m and m.group(0):
@@ -176,11 +178,14 @@ def find_pattern_in_file(filename, pattern):
 def find_pattern_in_files(FILE_DIR, pattern):
     """find pattern in all files (not subdirectories) in FILE_DIR"""
     matched_patterns = []
-    for f in glob.glob(f"{FILE_DIR}*.md", recursive=True):
-        filename = f.split("/")[-1]
-        matches = find_pattern_in_file(filename, pattern)
-        if matches:
-            matched_patterns.extend(matches)
+    for root, d_name, f_names in os.walk(f"{DN_DIR}"):
+        for fname in f_names:
+            if fname.startswith("."):
+                # want to ignore hidden files
+                continue
+            matches = find_pattern_in_file(fname, pattern, root)
+            if matches:
+                matched_patterns.extend(matches)
     return matched_patterns
 
 
@@ -199,7 +204,8 @@ def format_todos_by_action(todos: List[str], original_note_name=None):
             formatted_todos.append(new_todo)
         elif todo.action == Action.ARCHIVE:
             # add a backlink to original note
-            new_todo += f" [[{original_note_name}]]"
+            breakpoint()
+            new_todo = (f"- [ ] {todo.text} [[{original_note_name}]]")
             formatted_todos.append(new_todo)
     return formatted_todos
 
@@ -252,10 +258,8 @@ def get_open_todos(notename):
     """Get todos with the pattern [ ]
     """
     filename = f"{notename}.md"
-    open_todos = find_pattern_in_file(filename, OPEN_TASK_PATTERN)
+    open_todos = find_pattern_in_file(filename, OPEN_TASK_PATTERN, DN_DIR)
     # check if there are any backlinked todos:
-    backlinked_todos = get_backlink_todos(filename)
-    open_todos.extend(backlinked_todos)
     print(f"{len(open_todos)} open todos found in {filename}")
     return open_todos
 
@@ -303,6 +307,12 @@ def deduplicate_todos(todos: List[Todo]):
 
 def main():
     """Tommorrow note will not have the archived todos
+    Workflow
+    Get all open todos from today and extract todos which are shamed
+    and to be included in tomorrow's note, as well as archived todos
+    get backlinked todos for tomorrow, and ad them to the shamed todos
+    write out the DN.j2 template, and finally write out tomorrow's note
+    and write archived notes to Archive note
     """
     today_note_name = get_note_name_for("today")
     today_todos = get_open_todos(today_note_name)
@@ -312,8 +322,11 @@ def main():
                                                     today_note_name)
     # Add todos to tomorrow's note and write it out to a file
     tmrw_note_name = get_note_name_for("tomorrow")
+    backlinked_todos = get_backlink_todos(tmrw_note_name)
+    backlinked_todos_formatted = format_todos_by_action(backlinked_todos)
+    all_open_todos = backlinked_todos_formatted + shamed_todos_formatted
     templatified_note = add_content_to_note_template(tmrw_note_name,
-                                                     shamed_todos_formatted)
+                                                     all_open_todos)
     write_file(tmrw_note_name, templatified_note)
     # Make sure that we close out on pending tasks
     modified_today_note = replace_open_with_moved_todos(today_note_name)
