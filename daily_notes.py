@@ -204,7 +204,6 @@ def format_todos_by_action(todos: List[str], original_note_name=None):
             formatted_todos.append(new_todo)
         elif todo.action == Action.ARCHIVE:
             # add a backlink to original note
-            breakpoint()
             new_todo = (f"- [ ] {todo.text} [[{original_note_name}]]")
             formatted_todos.append(new_todo)
     return formatted_todos
