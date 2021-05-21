@@ -14,8 +14,7 @@ def parse():
         "--no-write-out",
         action="store_true",
         help=
-        "The script will only generate the new archive file, and ignore daily_notes"
-    )
+        "The script will show all logging output but not write out the files")
     parser.add_argument(
         "-a",
         "--only-write-to-archive",
