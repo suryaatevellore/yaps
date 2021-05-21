@@ -33,6 +33,7 @@ OPEN_TASK_PATTERN = r"(\s*)-\s+\[(\s|\>)\]\s*(!*)\s*(.*)"
 CLOSED_TASK_PATTERN = r"\[x\](.*)"
 SHOULD_ARCHIVE = True
 SHAME_THRESHOLD = 5
+STICKY_CHAR = "~S~"
 dlogger = logging.getLogger(__name__)
 
 
@@ -93,13 +94,16 @@ class Todo:
         self.plan_next_action()
 
     def plan_next_action(self):
+        # if the note is stickied, don't add shame
+        if STICKY_CHAR in self.text:
+            return
+        # if the note is coming from archive, then it doesn't need shame
+        # or action
+        if ARCHIVE_NOTE_NAME in self.src_note:
+            return
         # if there is no shame, init to 0 len
         if not self.shame:
             shame_meter = ""
-        if ARCHIVE_NOTE_NAME in self.src_note:
-            # if the note is coming from archive, then it doesn't need shame
-            # or action
-            return
 
         shame_meter = len(self.shame) + 1
         if shame_meter > SHAME_THRESHOLD:
@@ -254,6 +258,7 @@ def add_content_to_note_template(filename, todos):
                                     DN_DIR=DN_FOLDER,
                                     yesterday_note_name=yester_note_name,
                                     tomorrow_note_name=tmrw_note_name)
+    print(rendered_note)
     return rendered_note
 
 
@@ -288,7 +293,6 @@ def render_archive_template(todos, template=ARCHIVE_TEMPLATE):
     env = Environment(loader=file_loader)
     template = env.get_template(template)
     rendered_note = template.render(tasks=todos)
-    print(rendered_note)
     return rendered_note
 
 
@@ -328,14 +332,16 @@ def generate_daily_notes(config):
     today_note_name = get_note_name_for("today")
     today_todos = get_open_todos(today_note_name)
     shamed_todos = get_todos_by_action(today_todos, Action.SHAME)
+    # for daily notes, noop would be stickied todos
+    noop_todos = get_todos_by_action(today_todos, Action.NOOP)
     to_be_archived_todos = get_todos_by_action(today_todos, Action.ARCHIVE)
-    shamed_todos_formatted = format_todos_by_action(shamed_todos,
-                                                    today_note_name)
+    daily_todos = format_todos_by_action(shamed_todos + noop_todos,
+                                         today_note_name)
     # Add todos to tomorrow's note and write it out to a file
     tmrw_note_name = get_note_name_for("tomorrow")
     backlinked_todos = get_backlink_todos(tmrw_note_name)
     backlinked_todos_formatted = format_todos_by_action(backlinked_todos)
-    all_open_todos = backlinked_todos_formatted + shamed_todos_formatted
+    all_open_todos = backlinked_todos_formatted + daily_todos
     templatified_note = add_content_to_note_template(tmrw_note_name,
                                                      all_open_todos)
     # Make sure that we close out on pending tasks
