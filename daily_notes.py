@@ -7,6 +7,7 @@ from jinja2 import Template, Environment, FileSystemLoader
 import glob
 from typing import List
 from enum import Enum
+import logging
 
 HOME_DIR = "/Users/sahuja4/Dropbox (Facebook)/Second Brain/"
 DN_FOLDER = "Dailies"
@@ -33,6 +34,7 @@ OPEN_TASK_PATTERN = r"(\s*)-\s+\[(\s|\>)\]\s*(!*)\s*(.*)"
 CLOSED_TASK_PATTERN = r"\[x\](.*)"
 SHOULD_ARCHIVE = True
 SHAME_THRESHOLD = 5
+dlogger = logging.getLogger(__name__)
 
 
 class DateNotSupported(Exception):
@@ -286,7 +288,8 @@ def get_current_archived_todos(to_be_archived_todos,
                                notename=ARCHIVE_NOTE_NAME):
     # format these existing_todos by getting the open todos in archive
     todos_in_archive = get_open_todos(notename)
-    print(f"Found {len(todos_in_archive)} todos in current archive..")
+    logging.info(f"Found {len(todos_in_archive)} todos in current archive..")
+    dlogger.debug(f"Currently Archives todos are {todos_in_archive}")
     return todos_in_archive
 
 
@@ -301,10 +304,11 @@ def deduplicate_todos(todos: List[Todo]):
         else:
             dedup_todos.append(todo)
             seen.add(todo.ID)
+    dlogger.debug(f"Post deduplication, todos look like this {dedup_todos}")
     return dedup_todos
 
 
-def main():
+def generate_daily_notes(config):
     """Tommorrow note will not have the archived todos
     Workflow
     Get all open todos from today and extract todos which are shamed
@@ -326,10 +330,8 @@ def main():
     all_open_todos = backlinked_todos_formatted + shamed_todos_formatted
     templatified_note = add_content_to_note_template(tmrw_note_name,
                                                      all_open_todos)
-    write_file(tmrw_note_name, templatified_note)
     # Make sure that we close out on pending tasks
     modified_today_note = replace_open_with_moved_todos(today_note_name)
-    write_file(today_note_name, modified_today_note)
 
     # Now add stuff to archive
     # this involves, getting the current todos->combining them with new
@@ -341,8 +343,38 @@ def main():
     dedup_archived_todos_formatted = format_todos_by_action(
         dedup_archived_todos, today_note_name)
     archive_content = write_to_archive_template(dedup_archived_todos_formatted)
-    write_file(ARCHIVE_NOTE_NAME, archive_content)
+
+    if config["only_write_to_archive"]:
+        write_file(ARCHIVE_NOTE_NAME, archive_content)
+
+    if config["only_write_to_daily_notes"]:
+        write_file(tmrw_note_name, templatified_note)
+        write_file(today_note_name, modified_today_note)
 
 
-if __name__ == "__main__":
-    main()
+def _configure_logger():
+    dlogger.setLevel(level=logging.INFO)
+    log_format = "%(asctime)s:%(name)s:%(levelname)s:%(message)s"
+    logging.basicConfig(format=log_format)
+
+
+def set_options_and_generate_notes(args):
+    _configure_logger()
+    config = {
+        "only_write_to_archive": True,
+        "only_write_to_daily_notes": True,
+    }
+    # parse the argparse arguments
+    if args.z:
+        # with debug mode , we disable file writing regardless of
+        # other options
+        dlogger.setLevel(level=logging.DEBUG)
+        config["only_write_to_daily_notes"] = False
+        config["only_write_to_archive"] = False
+
+    if args.only_write_to_archive:
+        config["only_write_to_daily_notes"] = False
+    elif args.only_write_to_daily_notes:
+        config["only_write_to_archive"] = False
+
+    generate_daily_notes(config)
