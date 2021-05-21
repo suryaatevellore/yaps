@@ -1,4 +1,10 @@
 #!/usr/local/bin/python3.9
+"""
+Philosophy
+Keep what should be in focus at the top
+If start date is in the future, then don't show it on the current daily note
+I will think about it when the time comes
+"""
 
 import datetime
 import re
@@ -34,6 +40,8 @@ CLOSED_TASK_PATTERN = r"\[x\](.*)"
 SHOULD_ARCHIVE = True
 SHAME_THRESHOLD = 5
 STICKY_CHAR = "~S~"
+HIDE_FUTURE_TODOS_FROM_DAILY_NOTE = False
+PRESERVE_ORDER = False
 dlogger = logging.getLogger(__name__)
 
 
@@ -53,6 +61,7 @@ class Action(Enum):
     SHAME = 1
     ARCHIVE = 2
     NOOP = 3
+    FUTURE = 4
 
 
 class State(Enum):
@@ -91,15 +100,42 @@ class Todo:
         self.state = todo_state_map.get(self.marker, State.OPEN)
         self.upcoming_shame = ""
         self.action = Action.NOOP
+        self.start_date_note = None
+        self.extract_start_date_of_note()
         self.plan_next_action()
+
+    def extract_start_date_of_note(self):
+        """The first [[<daily_note>]] which follows the text will be the start_date note name"""
+        start_date_regex = r"\[\[(.*)\]\]"
+        matches = re.findall(start_date_regex, self.raw_text)
+        if matches:
+            # the first match will blindly be the start date
+            self.start_date_note = matches[0]
+
+    def is_start_date_in_future(self) -> bool:
+        if not self.start_date_note:
+            return False
+        today = datetime.date.today()
+        try:
+            start_date = get_date_from_note_name(self.start_date_note)
+        except DateNotSupported:
+            raise DateNotSupported(
+                f"Your start date (specified as [[]] at the end of the todo) is not in note format {NOTE_FORMAT}"
+            )
+        return today < start_date.date()
 
     def plan_next_action(self):
         # if the note is stickied, don't add shame
-        if STICKY_CHAR in self.text:
+        if STICKY_CHAR in self.text or self.is_start_date_in_future():
             return
         # if the note is coming from archive, then it doesn't need shame
         # or action
         if ARCHIVE_NOTE_NAME in self.src_note:
+            return
+        # if start date is set to a future date, the don't add shame
+        if self.is_start_date_in_future():
+            self.action = Action.FUTURE
+            self.upcoming_shame = ""
             return
         # if there is no shame, init to 0 len
         if not self.shame:
@@ -210,19 +246,27 @@ def get_todos_by_action(todos, action: Action):
     return [todo for todo in todos if todo.action == action]
 
 
-def format_todos_by_action(todos: List[str], original_note_name=None):
+def format_todos_by_action(todos: List[str],
+                           original_note_name=None) -> List[str]:
     """Format todos for the new note"""
     formatted_todos = []
     for todo in todos:
         new_todo = f"{todo.front_spaces} - [ ] {todo.upcoming_shame} {todo.text}"
         if todo.action == Action.SHAME:
             formatted_todos.append(new_todo)
+        elif todo.action == Action.FUTURE:
+            # if the future todos are to be hidden from the DN
+            if HIDE_FUTURE_TODOS_FROM_DAILY_NOTE:
+                continue
+            else:
+                formatted_todos.append(new_todo)
         elif todo.action == Action.ARCHIVE:
             # add a backlink to original note
             new_todo = (f"- [ ] {todo.text} [[{original_note_name}]]")
             formatted_todos.append(new_todo)
         elif todo.action == Action.NOOP:
             formatted_todos.append(f"{todo.raw_text}")
+
     return formatted_todos
 
 
@@ -320,6 +364,16 @@ def deduplicate_todos(todos: List[Todo]):
     return dedup_todos
 
 
+def reorder_todos(today_todos: List[Todo]):
+    # shame first, next noop, last future
+    shamed_todos = get_todos_by_action(today_todos, Action.SHAME)
+    # for daily notes, noop would be stickied todos
+    noop_todos = get_todos_by_action(today_todos, Action.NOOP)
+    future_todos = get_todos_by_action(today_todos, Action.FUTURE)
+
+    return shamed_todos + noop_todos + future_todos
+
+
 def generate_daily_notes(config):
     """Tommorrow note will not have the archived todos
     Workflow
@@ -331,12 +385,10 @@ def generate_daily_notes(config):
     """
     today_note_name = get_note_name_for("today")
     today_todos = get_open_todos(today_note_name)
-    shamed_todos = get_todos_by_action(today_todos, Action.SHAME)
-    # for daily notes, noop would be stickied todos
-    noop_todos = get_todos_by_action(today_todos, Action.NOOP)
-    to_be_archived_todos = get_todos_by_action(today_todos, Action.ARCHIVE)
-    daily_todos = format_todos_by_action(shamed_todos + noop_todos,
-                                         today_note_name)
+    # reorder by what feels best
+    if not PRESERVE_ORDER:
+        today_todos = reorder_todos(today_todos)
+    daily_todos = format_todos_by_action(today_todos, today_note_name)
     # Add todos to tomorrow's note and write it out to a file
     tmrw_note_name = get_note_name_for("tomorrow")
     backlinked_todos = get_backlink_todos(tmrw_note_name)
@@ -351,6 +403,7 @@ def generate_daily_notes(config):
     # this involves, getting the current todos->combining them with new
     # archived todos -> removing duplicates -> formatting them -> adding to
     # archive template -> write file
+    to_be_archived_todos = get_todos_by_action(today_todos, Action.ARCHIVE)
     current_archived_todos = get_current_archived_todos(to_be_archived_todos)
     all_archive_todos = current_archived_todos + to_be_archived_todos
     dedup_archived_todos = deduplicate_todos(all_archive_todos)
@@ -375,24 +428,29 @@ def _configure_logger():
     logging.basicConfig(format=log_format)
 
 
-def set_options_and_generate_notes(args):
+def set_options_and_generate_notes(args=None):
     _configure_logger()
     config = {
         "disable_writes": False,
         "only_write_to_archive": True,
         "only_write_to_daily_notes": True,
     }
+
     # parse the argparse arguments
-    if args.z:
+    if args and args.z:
         # with debug mode , we disable file writing regardless of
         # other options
         dlogger.setLevel(level=logging.DEBUG)
 
-    if args.no_write_out:
+    if args and args.no_write_out:
         config["disable_writes"] = True
-    elif args.only_write_to_archive:
+    elif args and args.only_write_to_archive:
         config["only_write_to_daily_notes"] = False
-    elif args.only_write_to_daily_notes:
+    elif args and args.only_write_to_daily_notes:
         config["only_write_to_archive"] = False
 
     generate_daily_notes(config)
+
+
+if __name__ == "__main__":
+    set_options_and_generate_notes()
