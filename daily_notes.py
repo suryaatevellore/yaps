@@ -3,20 +3,19 @@
 import datetime
 import re
 import os
-from jinja2 import Template, Environment, FileSystemLoader
-import glob
+from jinja2 import Environment, FileSystemLoader
 from typing import List
 from enum import Enum
 import logging
 
-HOME_DIR = "/Users/sahuja4/Dropbox (Facebook)/Second Brain/"
+HOME_DIR = "/Users/sahuja4/Dropbox (Facebook)/Second Brain"
 DN_FOLDER = "Dailies"
 SCRIPTS_FOLDER = "Scripts"
 TEMPLATES_FOLDER = "Templates"
 
 SCRIPT_DIR = f"{HOME_DIR}/{SCRIPTS_FOLDER}"
-DN_DIR = f"{HOME_DIR}/{DN_FOLDER}/"
-TEMPLATE_DIR = f"{HOME_DIR}/{TEMPLATES_FOLDER}/"
+DN_DIR = f"{HOME_DIR}/{DN_FOLDER}"
+TEMPLATE_DIR = f"{HOME_DIR}/{TEMPLATES_FOLDER}"
 ARCHIVE_NOTE_NAME = "Archive"
 ARCHIVE_NOTE_DIR = f"{DN_DIR}"
 SHAME_CHAR = "!"
@@ -52,6 +51,7 @@ class DateTextNotFound(Exception):
 class Action(Enum):
     SHAME = 1
     ARCHIVE = 2
+    NOOP = 3
 
 
 class State(Enum):
@@ -74,11 +74,13 @@ notename should be the title of the note
 class Todo:
     def __init__(self,
                  raw_text,
+                 notename,
                  front_spaces="",
                  todo_marker="x",
                  todo_shame="",
                  todo_text=""):
         self.raw_text = raw_text
+        self.src_note = notename
         self.front_spaces = front_spaces
         self.marker = f"[{todo_marker}]"
         self.shame = todo_shame
@@ -87,13 +89,18 @@ class Todo:
         # Any unknown state will be open state
         self.state = todo_state_map.get(self.marker, State.OPEN)
         self.upcoming_shame = ""
-        self.action = None
+        self.action = Action.NOOP
         self.plan_next_action()
 
     def plan_next_action(self):
         # if there is no shame, init to 0 len
         if not self.shame:
             shame_meter = ""
+        if ARCHIVE_NOTE_NAME in self.src_note:
+            # if the note is coming from archive, then it doesn't need shame
+            # or action
+            return
+
         shame_meter = len(self.shame) + 1
         if shame_meter > SHAME_THRESHOLD:
             # No sense of putting shame on an archived todo
@@ -104,10 +111,10 @@ class Todo:
             self.upcoming_shame = SHAME_CHAR * shame_meter
 
     def __repr__(self):
-        return f"{__class__.__name__}({self.front_spaces} [{self.marker}] {self.text})"
+        return f"{__class__.__name__}({self.front_spaces} {self.marker} {self.upcoming_shame} {self.text}) {self.action}"
 
     def __str__(self):
-        return f"{self.front_spaces} [{self.marker}] {self.text})"
+        return f"{self.front_spaces} {self.marker} {self.text})"
 
 
 def get_date_from_note_name(note_name):
@@ -155,21 +162,22 @@ def get_note_name_for(target) -> str:
     )
 
 
-def get_file_content(filename: str, directory=DN_DIR):
+def get_file_content(notename: str, directory=DN_DIR):
     """get file content from filename, from directory
     """
-    filename = f"{directory}/{filename}"
+    filename = f"{directory}/{notename}.md"
     return open(filename, "r+").read().rstrip()
 
 
-def find_pattern_in_file(filename, pattern, dir_path=None):
+def find_pattern_in_file(notename: str, pattern, dir_path=None):
     matching_lines = []
-    note_text = get_file_content(filename, dir_path)
+    note_text = get_file_content(notename, dir_path)
     for line in note_text.split("\n"):
         m = re.search(pattern, line)
         if m and m.group(0):
             matching_lines.append(
                 Todo(raw_text=m.group(0),
+                     notename=notename,
                      front_spaces=m.group(1),
                      todo_marker=m.group(2),
                      todo_shame=m.group(3),
@@ -177,7 +185,7 @@ def find_pattern_in_file(filename, pattern, dir_path=None):
     return matching_lines
 
 
-def find_pattern_in_files(FILE_DIR, pattern):
+def find_pattern_in_files(FILE_DIR: str, pattern: str):
     """find pattern in all files (not subdirectories) in FILE_DIR"""
     matched_patterns = []
     for root, d_name, f_names in os.walk(f"{DN_DIR}"):
@@ -185,7 +193,8 @@ def find_pattern_in_files(FILE_DIR, pattern):
             if fname.startswith("."):
                 # want to ignore hidden files
                 continue
-            matches = find_pattern_in_file(fname, pattern, root)
+            notename = fname.split(".")[0]
+            matches = find_pattern_in_file(notename, pattern, root)
             if matches:
                 matched_patterns.extend(matches)
     return matched_patterns
@@ -208,6 +217,8 @@ def format_todos_by_action(todos: List[str], original_note_name=None):
             # add a backlink to original note
             new_todo = (f"- [ ] {todo.text} [[{original_note_name}]]")
             formatted_todos.append(new_todo)
+        elif todo.action == Action.NOOP:
+            formatted_todos.append(f"{todo.raw_text}")
     return formatted_todos
 
 
@@ -246,11 +257,11 @@ def add_content_to_note_template(filename, todos):
     return rendered_note
 
 
-def replace_open_with_moved_todos(filename):
+def replace_open_with_moved_todos(notename):
     """Replace open [ ] with moved todo symbol [>]
     to differentiate between open and close todos
     """
-    note = get_file_content(f"{filename}.md")
+    note = get_file_content(notename)
     modified_content = re.sub(r"\[\s\]", r"[>]", note)
     return modified_content
 
@@ -258,10 +269,9 @@ def replace_open_with_moved_todos(filename):
 def get_open_todos(notename):
     """Get todos with the pattern [ ]
     """
-    filename = f"{notename}.md"
-    open_todos = find_pattern_in_file(filename, OPEN_TASK_PATTERN, DN_DIR)
+    open_todos = find_pattern_in_file(notename, OPEN_TASK_PATTERN, DN_DIR)
     # check if there are any backlinked todos:
-    print(f"{len(open_todos)} open todos found in {filename}")
+    print(f"{len(open_todos)} open todos found in {notename}.md")
     return open_todos
 
 
@@ -273,14 +283,12 @@ def get_backlink_todos(notename):
     return backlink_todos
 
 
-def write_to_archive_template(todos,
-                              notename=ARCHIVE_NOTE_NAME,
-                              template=ARCHIVE_TEMPLATE):
-    filename = f"{ARCHIVE_NOTE_DIR}/{notename}.md"
+def render_archive_template(todos, template=ARCHIVE_TEMPLATE):
     file_loader = FileSystemLoader(SCRIPT_DIR)
     env = Environment(loader=file_loader)
     template = env.get_template(template)
     rendered_note = template.render(tasks=todos)
+    print(rendered_note)
     return rendered_note
 
 
@@ -342,7 +350,10 @@ def generate_daily_notes(config):
     dedup_archived_todos = deduplicate_todos(all_archive_todos)
     dedup_archived_todos_formatted = format_todos_by_action(
         dedup_archived_todos, today_note_name)
-    archive_content = write_to_archive_template(dedup_archived_todos_formatted)
+    archive_content = render_archive_template(dedup_archived_todos_formatted)
+
+    if config["disable_writes"]:
+        return
 
     if config["only_write_to_archive"]:
         write_file(ARCHIVE_NOTE_NAME, archive_content)
@@ -361,6 +372,7 @@ def _configure_logger():
 def set_options_and_generate_notes(args):
     _configure_logger()
     config = {
+        "disable_writes": False,
         "only_write_to_archive": True,
         "only_write_to_daily_notes": True,
     }
@@ -369,10 +381,10 @@ def set_options_and_generate_notes(args):
         # with debug mode , we disable file writing regardless of
         # other options
         dlogger.setLevel(level=logging.DEBUG)
-        config["only_write_to_daily_notes"] = False
-        config["only_write_to_archive"] = False
 
-    if args.only_write_to_archive:
+    if args.no_write_out:
+        config["disable_writes"] = True
+    elif args.only_write_to_archive:
         config["only_write_to_daily_notes"] = False
     elif args.only_write_to_daily_notes:
         config["only_write_to_archive"] = False

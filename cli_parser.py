@@ -10,6 +10,13 @@ def parse():
                         action="store_true",
                         help="start debug level logging")
     parser.add_argument(
+        "-n",
+        "--no-write-out",
+        action="store_true",
+        help=
+        "The script will only generate the new archive file, and ignore daily_notes"
+    )
+    parser.add_argument(
         "-a",
         "--only-write-to-archive",
         action="store_true",
