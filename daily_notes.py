@@ -251,7 +251,7 @@ def format_todos_by_action(todos: List[str],
     """Format todos for the new note"""
     formatted_todos = []
     for todo in todos:
-        new_todo = f"{todo.front_spaces} - [ ] {todo.upcoming_shame} {todo.text}"
+        new_todo = f"{todo.front_spaces}- [ ] {todo.upcoming_shame} {todo.text}"
         if todo.action == Action.SHAME:
             formatted_todos.append(new_todo)
         elif todo.action == Action.FUTURE:
@@ -265,7 +265,11 @@ def format_todos_by_action(todos: List[str],
             new_todo = (f"- [ ] {todo.text} [[{original_note_name}]]")
             formatted_todos.append(new_todo)
         elif todo.action == Action.NOOP:
-            formatted_todos.append(f"{todo.raw_text}")
+            # make sure that the marker for the todo is not moved
+            # for backlinked todos, can be solved better by managing
+            # state of the todo
+            moved_to_open = todo.raw_text.replace("[>]", "[ ]")
+            formatted_todos.append(f"{moved_to_open}")
 
     return formatted_todos
 
@@ -276,7 +280,7 @@ def write_file(notename, content, directory=DN_DIR):
     filename = f"{directory}/{notename}.md"
     with open(filename, "w+") as f:
         f.write(content)
-    print(f"Successfully wrote {len(content)} lines to {filename}")
+    dlogger.info(f"Successfully wrote {len(content)} lines to {filename}")
 
 
 def add_content_to_archive(filename, todos):
@@ -302,7 +306,6 @@ def add_content_to_note_template(filename, todos):
                                     DN_DIR=DN_FOLDER,
                                     yesterday_note_name=yester_note_name,
                                     tomorrow_note_name=tmrw_note_name)
-    print(rendered_note)
     return rendered_note
 
 
@@ -320,14 +323,14 @@ def get_open_todos(notename):
     """
     open_todos = find_pattern_in_file(notename, OPEN_TASK_PATTERN, DN_DIR)
     # check if there are any backlinked todos:
-    print(f"{len(open_todos)} open todos found in {notename}.md")
+    dlogger.info(f"{len(open_todos)} open todos found in {notename}.md")
     return open_todos
 
 
 def get_backlink_todos(notename):
     pattern = OPEN_TASK_PATTERN + f"\[\[({notename})\]\]"
     backlink_todos = find_pattern_in_files(DN_DIR, pattern)
-    print(
+    dlogger.info(
         f"{len(backlink_todos)} backlinked todo(s) found for note {notename}")
     return backlink_todos
 
@@ -344,7 +347,7 @@ def get_current_archived_todos(to_be_archived_todos,
                                notename=ARCHIVE_NOTE_NAME):
     # format these existing_todos by getting the open todos in archive
     todos_in_archive = get_open_todos(notename)
-    logging.info(f"Found {len(todos_in_archive)} todos in current archive..")
+    dlogger.info(f"Found {len(todos_in_archive)} todos in current archive..")
     dlogger.debug(f"Currently Archives todos are {todos_in_archive}")
     return todos_in_archive
 
@@ -384,18 +387,17 @@ def generate_daily_notes(config):
     and write archived notes to Archive note
     """
     today_note_name = get_note_name_for("today")
+    tmrw_note_name = get_note_name_for("tomorrow")
     today_todos = get_open_todos(today_note_name)
     # reorder by what feels best
     if not PRESERVE_ORDER:
         today_todos = reorder_todos(today_todos)
-    daily_todos = format_todos_by_action(today_todos, today_note_name)
-    # Add todos to tomorrow's note and write it out to a file
-    tmrw_note_name = get_note_name_for("tomorrow")
     backlinked_todos = get_backlink_todos(tmrw_note_name)
-    backlinked_todos_formatted = format_todos_by_action(backlinked_todos)
-    all_open_todos = backlinked_todos_formatted + daily_todos
+    # Add todos to tomorrow's note and write it out to a file
+    tmrw_todos_dedup = deduplicate_todos(backlinked_todos + today_todos)
+    formatted_tmrw_todos = format_todos_by_action(tmrw_todos_dedup)
     templatified_note = add_content_to_note_template(tmrw_note_name,
-                                                     all_open_todos)
+                                                     formatted_tmrw_todos)
     # Make sure that we close out on pending tasks
     modified_today_note = replace_open_with_moved_todos(today_note_name)
 
@@ -412,6 +414,7 @@ def generate_daily_notes(config):
     archive_content = render_archive_template(dedup_archived_todos_formatted)
 
     if config["disable_writes"]:
+        dlogger.info(templatified_note)
         return
 
     if config["only_write_to_archive"]:
