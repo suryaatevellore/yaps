@@ -40,7 +40,7 @@ CLOSED_TASK_PATTERN = r"\[x\](.*)"
 SHOULD_ARCHIVE = True
 SHAME_THRESHOLD = 5
 STICKY_CHAR = "~S~"
-HIDE_FUTURE_TODOS_FROM_DAILY_NOTE = False
+HIDE_FUTURE_TODOS_FROM_DAILY_NOTE = True
 PRESERVE_ORDER = False
 dlogger = logging.getLogger(__name__)
 
@@ -70,11 +70,6 @@ class State(Enum):
     MOVED = 3
 
 
-todo_state_map = {
-    "[x]": State.CLOSED,
-    "[ ]": State.OPEN,
-    "[>]": State.MOVED,
-}
 """Thoughts
 filname should be notename.md
 notename should be the title of the note
@@ -91,26 +86,31 @@ class Todo:
                  todo_text=""):
         self.raw_text = raw_text
         self.src_note = notename
+        self.target_note = None
         self.front_spaces = front_spaces
         self.marker = f"[{todo_marker}]"
         self.shame = todo_shame
         self.text = todo_text.strip()
         self.ID = hash(self.text)
         # Any unknown state will be open state
-        self.state = todo_state_map.get(self.marker, State.OPEN)
         self.upcoming_shame = ""
         self.action = Action.NOOP
         self.start_date_note = None
-        self.extract_start_date_of_note()
+        self.get_target_note_from_todo_text()
         self.plan_next_action()
 
-    def extract_start_date_of_note(self):
+    def set_action(self, action: Action):
+        self.action = action
+
+    def get_target_note_from_todo_text(self):
         """The first [[<daily_note>]] which follows the text will be the start_date note name"""
-        start_date_regex = r"\[\[(.*)\]\]"
+        start_date_regex = r"\[\[(D\d+)\]\]"
         matches = re.findall(start_date_regex, self.raw_text)
         if matches:
-            # the first match will blindly be the start date
-            self.start_date_note = matches[0]
+            # the last match will blindly be the start date
+            self.start_date_note = matches[-1]
+            self.text = self.text.split(
+                f"[[{self.start_date_note}]]")[0].strip()
 
     def is_start_date_in_future(self) -> bool:
         if not self.start_date_note:
@@ -126,7 +126,7 @@ class Todo:
 
     def plan_next_action(self):
         # if the note is stickied, don't add shame
-        if STICKY_CHAR in self.text or self.is_start_date_in_future():
+        if STICKY_CHAR in self.text:
             return
         # if the note is coming from archive, then it doesn't need shame
         # or action
@@ -191,7 +191,6 @@ def get_note_name_for(target, timedelta) -> str:
     """Get filenames for today, tomorrow, and yesterday notes
     """
 
-    # short circuit for tomorrow
     if target == "tomorrow":
         today = datetime.date.today()
         dateObject = add_day_delta(today, 1)
@@ -201,9 +200,10 @@ def get_note_name_for(target, timedelta) -> str:
             raise DateNotSupported(
                 "This format of date is not supported. Supported format is YYYY-MM-DD"
             )
-        dateObject = datetime.strptime(target, '%y-%m-%d')
+        # Supported only the iso format YYYY-MM-DD
+        dateObject = datetime.datetime.fromisoformat(match.group(0))
     targetDateObject = add_day_delta(dateObject, timedelta)
-    return targetDateObject.strftime(NOTE_FORMAT)
+    return get_note_name_from_date(targetDateObject)
 
 
 def get_file_content(notename: str, directory=DN_DIR):
@@ -273,6 +273,8 @@ def format_todos_by_action(todos: List[str],
             # for backlinked todos, can be solved better by managing
             # state of the todo
             moved_to_open = todo.raw_text.replace("[>]", "[ ]")
+            moved_to_open = moved_to_open.split(
+                f"[[{todo.start_date_note}]]")[0].strip()
             formatted_todos.append(f"{moved_to_open}")
 
     return formatted_todos
@@ -336,6 +338,10 @@ def get_backlink_todos(notename):
     backlink_todos = find_pattern_in_files(DN_DIR, pattern)
     dlogger.info(
         f"{len(backlink_todos)} backlinked todo(s) found for note {notename}")
+    # backlinked todos will have a date set to future, but now needs to be set
+    # to NOOP
+    for todo in backlink_todos:
+        todo.set_action(Action.NOOP)
     return backlink_todos
 
 
@@ -393,7 +399,6 @@ def generate_daily_notes(config):
 
     today_note_name = get_note_name_for(config["day_date"], timedelta=0)
     yesterday_note_name = get_note_name_for(config["day_date"], timedelta=-1)
-    # breakpoint()
 
     today_todos = get_open_todos(yesterday_note_name)
     # reorder by what feels best
