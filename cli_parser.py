@@ -10,6 +10,12 @@ def parse():
                         action="store_true",
                         help="start debug level logging")
     parser.add_argument(
+        '--target',
+        dest='day_date',
+        default="tomorrow",
+        help=("date for which note is to be created in YYYY-MM-DD format "
+              "e.g. 2021-04-01 (default is tomorrow)"))
+    parser.add_argument(
         "-n",
         "--no-write-out",
         action="store_true",

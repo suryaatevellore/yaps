@@ -179,27 +179,31 @@ def add_day_delta(note_date, timedelta):
     return note_date + datetime.timedelta(timedelta)
 
 
-def get_note_name_from_date(note_date):
-    """Get note_name from note_date"""
+def get_note_name_from_date(note_date) -> str:
+    """
+    note_date: datetime object
+    Get note_name from note_date
+    """
     return note_date.strftime(NOTE_FORMAT)
 
 
-def get_note_name_for(target) -> str:
+def get_note_name_for(target, timedelta) -> str:
     """Get filenames for today, tomorrow, and yesterday notes
     """
-    today = datetime.date.today()
-    if target == "today":
-        return get_note_name_from_date(today)
-    elif target == "tomorrow":
-        tomorrow = add_day_delta(today, 1)
-        return tomorrow.strftime(NOTE_FORMAT)
-    elif target == "yesterday":
-        yesterday = add_day_delta(today, -1)
-        return yesterday.strftime(NOTE_FORMAT)
 
-    raise DayNotSupported(
-        f"Within this function, only today, tomorrow, and yesterday functions are supported"
-    )
+    # short circuit for tomorrow
+    if target == "tomorrow":
+        today = datetime.date.today()
+        dateObject = add_day_delta(today, 1)
+    else:
+        match = re.search(r"\d{4}-\d{2}-\d{2}", target)
+        if not match:
+            raise DateNotSupported(
+                "This format of date is not supported. Supported format is YYYY-MM-DD"
+            )
+        dateObject = datetime.strptime(target, '%y-%m-%d')
+    targetDateObject = add_day_delta(dateObject, timedelta)
+    return targetDateObject.strftime(NOTE_FORMAT)
 
 
 def get_file_content(notename: str, directory=DN_DIR):
@@ -386,20 +390,23 @@ def generate_daily_notes(config):
     write out the DN.j2 template, and finally write out tomorrow's note
     and write archived notes to Archive note
     """
-    today_note_name = get_note_name_for("today")
-    tmrw_note_name = get_note_name_for("tomorrow")
-    today_todos = get_open_todos(today_note_name)
+
+    today_note_name = get_note_name_for(config["day_date"], timedelta=0)
+    yesterday_note_name = get_note_name_for(config["day_date"], timedelta=-1)
+    # breakpoint()
+
+    today_todos = get_open_todos(yesterday_note_name)
     # reorder by what feels best
     if not PRESERVE_ORDER:
         today_todos = reorder_todos(today_todos)
-    backlinked_todos = get_backlink_todos(tmrw_note_name)
+    backlinked_todos = get_backlink_todos(today_note_name)
     # Add todos to tomorrow's note and write it out to a file
     tmrw_todos_dedup = deduplicate_todos(backlinked_todos + today_todos)
     formatted_tmrw_todos = format_todos_by_action(tmrw_todos_dedup)
-    templatified_note = add_content_to_note_template(tmrw_note_name,
+    templatified_note = add_content_to_note_template(today_note_name,
                                                      formatted_tmrw_todos)
     # Make sure that we close out on pending tasks
-    modified_today_note = replace_open_with_moved_todos(today_note_name)
+    modified_today_note = replace_open_with_moved_todos(yesterday_note_name)
 
     # Now add stuff to archive
     # this involves, getting the current todos->combining them with new
@@ -410,7 +417,7 @@ def generate_daily_notes(config):
     all_archive_todos = current_archived_todos + to_be_archived_todos
     dedup_archived_todos = deduplicate_todos(all_archive_todos)
     dedup_archived_todos_formatted = format_todos_by_action(
-        dedup_archived_todos, today_note_name)
+        dedup_archived_todos, yesterday_note_name)
     archive_content = render_archive_template(dedup_archived_todos_formatted)
 
     if config["disable_writes"]:
@@ -421,8 +428,8 @@ def generate_daily_notes(config):
         write_file(ARCHIVE_NOTE_NAME, archive_content)
 
     if config["only_write_to_daily_notes"]:
-        write_file(tmrw_note_name, templatified_note)
-        write_file(today_note_name, modified_today_note)
+        write_file(today_note_name, templatified_note)
+        write_file(yesterday_note_name, modified_today_note)
 
 
 def _configure_logger():
@@ -434,6 +441,7 @@ def _configure_logger():
 def set_options_and_generate_notes(args=None):
     _configure_logger()
     config = {
+        "day_date": None,
         "disable_writes": False,
         "only_write_to_archive": True,
         "only_write_to_daily_notes": True,
@@ -445,6 +453,7 @@ def set_options_and_generate_notes(args=None):
         # other options
         dlogger.setLevel(level=logging.DEBUG)
 
+    config["day_date"] = args.day_date
     if args and args.no_write_out:
         config["disable_writes"] = True
     elif args and args.only_write_to_archive:
