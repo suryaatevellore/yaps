@@ -59,6 +59,8 @@ class DateTextNotFound(Exception):
 
 class Action(Enum):
     SHAME = 1
+    # ARCHIVE state is for notes that are either in archive
+    # or to be archived
     ARCHIVE = 2
     NOOP = 3
     FUTURE = 4
@@ -91,8 +93,6 @@ class Todo:
         self.marker = f"[{todo_marker}]"
         self.shame = todo_shame
         self.text = todo_text.strip()
-        self.ID = hash(self.text)
-        # Any unknown state will be open state
         self.upcoming_shame = ""
         self.action = Action.NOOP
         self.start_date_note = None
@@ -131,6 +131,7 @@ class Todo:
         # if the note is coming from archive, then it doesn't need shame
         # or action
         if ARCHIVE_NOTE_NAME in self.src_note:
+            self.action = Action.ARCHIVE
             return
         # if start date is set to a future date, the don't add shame
         if self.is_start_date_in_future():
@@ -192,8 +193,7 @@ def get_note_name_for(target, timedelta) -> str:
     """
 
     if target == "tomorrow":
-        today = datetime.date.today()
-        dateObject = add_day_delta(today, 1)
+        dateObject = datetime.date.today()
     else:
         match = re.search(r"\d{4}-\d{2}-\d{2}", target)
         if not match:
@@ -266,7 +266,7 @@ def format_todos_by_action(todos: List[str],
                 formatted_todos.append(new_todo)
         elif todo.action == Action.ARCHIVE:
             # add a backlink to original note
-            new_todo = (f"- [ ] {todo.text} [[{original_note_name}]]")
+            new_todo = (f"{todo.front_spaces}- [ ] {todo.text}")
             formatted_todos.append(new_todo)
         elif todo.action == Action.NOOP:
             # make sure that the marker for the todo is not moved
@@ -274,7 +274,7 @@ def format_todos_by_action(todos: List[str],
             # state of the todo
             moved_to_open = todo.raw_text.replace("[>]", "[ ]")
             moved_to_open = moved_to_open.split(
-                f"[[{todo.start_date_note}]]")[0].strip()
+                f"[[{todo.start_date_note}]]")[0].rstrip()
             formatted_todos.append(f"{moved_to_open}")
 
     return formatted_todos
@@ -324,7 +324,7 @@ def replace_open_with_moved_todos(notename):
     return modified_content
 
 
-def get_open_todos(notename):
+def get_open_todos(notename: str):
     """Get todos with the pattern [ ]
     """
     open_todos = find_pattern_in_file(notename, OPEN_TASK_PATTERN, DN_DIR)
@@ -333,13 +333,15 @@ def get_open_todos(notename):
     return open_todos
 
 
-def get_backlink_todos(notename):
+def get_backlink_todos(notename: str):
+    """backlinked todos will have a date set to future, so if their start date is
+    the note for which the todos are being created, then their action should be
+    NOOP
+    """
     pattern = OPEN_TASK_PATTERN + f"\[\[({notename})\]\]"
     backlink_todos = find_pattern_in_files(DN_DIR, pattern)
     dlogger.info(
         f"{len(backlink_todos)} backlinked todo(s) found for note {notename}")
-    # backlinked todos will have a date set to future, but now needs to be set
-    # to NOOP
     for todo in backlink_todos:
         todo.set_action(Action.NOOP)
     return backlink_todos
@@ -368,11 +370,12 @@ def deduplicate_todos(todos: List[Todo]):
     dedup_todos = []
     seen = set()
     for todo in todos:
-        if todo.ID in seen:
+        thash = hash(todo.text)
+        if thash in seen:
             continue
         else:
             dedup_todos.append(todo)
-            seen.add(todo.ID)
+            seen.add(thash)
     dlogger.debug(f"Post deduplication, todos look like this {dedup_todos}")
     return dedup_todos
 
@@ -400,13 +403,13 @@ def generate_daily_notes(config):
     today_note_name = get_note_name_for(config["day_date"], timedelta=0)
     yesterday_note_name = get_note_name_for(config["day_date"], timedelta=-1)
 
-    today_todos = get_open_todos(yesterday_note_name)
+    yesterday_todos = get_open_todos(yesterday_note_name)
     # reorder by what feels best
     if not PRESERVE_ORDER:
-        today_todos = reorder_todos(today_todos)
+        yesterday_todos = reorder_todos(yesterday_todos)
     backlinked_todos = get_backlink_todos(today_note_name)
     # Add todos to tomorrow's note and write it out to a file
-    tmrw_todos_dedup = deduplicate_todos(backlinked_todos + today_todos)
+    tmrw_todos_dedup = deduplicate_todos(backlinked_todos + yesterday_todos)
     formatted_tmrw_todos = format_todos_by_action(tmrw_todos_dedup)
     templatified_note = add_content_to_note_template(today_note_name,
                                                      formatted_tmrw_todos)
@@ -417,7 +420,7 @@ def generate_daily_notes(config):
     # this involves, getting the current todos->combining them with new
     # archived todos -> removing duplicates -> formatting them -> adding to
     # archive template -> write file
-    to_be_archived_todos = get_todos_by_action(today_todos, Action.ARCHIVE)
+    to_be_archived_todos = get_todos_by_action(yesterday_todos, Action.ARCHIVE)
     current_archived_todos = get_current_archived_todos(to_be_archived_todos)
     all_archive_todos = current_archived_todos + to_be_archived_todos
     dedup_archived_todos = deduplicate_todos(all_archive_todos)
