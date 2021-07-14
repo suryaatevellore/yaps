@@ -4,8 +4,12 @@
 
 ![image](https://embed.filekitcdn.com/e/7gb4aVSzCgy3BdETWHXsWz/4Ye7f3gwNYcqeMWC3scUU2)
 
+{% if 'quote' is defined and 'quote'|length %}
+> {{quote[0]}}
+<cite>{{quote[1]}}</cite>
+{% else %}
 <%tp.web.daily_quote()%>
-
+{% endif %}
 
 ## Tasks
 #todo

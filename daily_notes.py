@@ -13,6 +13,7 @@ from jinja2 import Environment, FileSystemLoader
 from typing import List
 from enum import Enum
 import logging
+from quotes import QuotesGetter
 
 HOME_DIR = "/Users/sahuja4/Dropbox (Facebook)/Second Brain"
 DN_FOLDER = "Dailies"
@@ -192,16 +193,11 @@ def get_note_name_for(target, timedelta) -> str:
     """Get filenames for today, tomorrow, and yesterday notes
     """
 
-    if target == "tomorrow":
-        dateObject = datetime.date.today()
-    else:
-        match = re.search(r"\d{4}-\d{2}-\d{2}", target)
-        if not match:
-            raise DateNotSupported(
-                "This format of date is not supported. Supported format is YYYY-MM-DD"
-            )
-        # Supported only the iso format YYYY-MM-DD
-        dateObject = datetime.datetime.fromisoformat(match.group(0))
+    match = re.search(r"\d{4}-\d{2}-\d{2}", target)
+    if match:
+        target = match.group(0)
+    # Supported only the iso format YYYY-MM-DD
+    dateObject = datetime.datetime.fromisoformat(match.group(0))
     targetDateObject = add_day_delta(dateObject, timedelta)
     return get_note_name_from_date(targetDateObject)
 
@@ -308,10 +304,12 @@ def add_content_to_note_template(filename, todos):
     tmrw_note_name = get_note_name_from_date(tmrw_date)
     yester_date = add_day_delta(note_date, -1)
     yester_note_name = get_note_name_from_date(yester_date)
+    quote = QuotesGetter().get_a_random_quote()
     rendered_note = template.render(tasks=todos,
                                     DN_DIR=DN_FOLDER,
                                     yesterday_note_name=yester_note_name,
-                                    tomorrow_note_name=tmrw_note_name)
+                                    tomorrow_note_name=tmrw_note_name,
+                                    quote=quote)
     return rendered_note
 
 
@@ -448,26 +446,28 @@ def _configure_logger():
 
 def set_options_and_generate_notes(args=None):
     _configure_logger()
+    today = datetime.date.today()
     config = {
-        "day_date": None,
+        "day_date": today.isoformat(),
         "disable_writes": False,
         "only_write_to_archive": True,
         "only_write_to_daily_notes": True,
     }
 
-    # parse the argparse arguments
-    if args and args.z:
-        # with debug mode , we disable file writing regardless of
-        # other options
-        dlogger.setLevel(level=logging.DEBUG)
+    if args:
+        # parse the argparse arguments
+        if args and args.z:
+            # with debug mode , we disable file writing regardless of
+            # other options
+            dlogger.setLevel(level=logging.DEBUG)
 
-    config["day_date"] = args.day_date
-    if args and args.no_write_out:
-        config["disable_writes"] = True
-    elif args and args.only_write_to_archive:
-        config["only_write_to_daily_notes"] = False
-    elif args and args.only_write_to_daily_notes:
-        config["only_write_to_archive"] = False
+        config["day_date"] = args.day_date
+        if args and args.no_write_out:
+            config["disable_writes"] = True
+        elif args and args.only_write_to_archive:
+            config["only_write_to_daily_notes"] = False
+        elif args and args.only_write_to_daily_notes:
+            config["only_write_to_archive"] = False
 
     generate_daily_notes(config)
 
