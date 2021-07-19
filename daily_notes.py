@@ -264,12 +264,6 @@ def find_pattern_in_files(FILE_DIR: str, pattern: str):
     return matched_patterns
 
 
-def get_todos_by_action(todos, action: Action):
-    """Filter todos by Action
-    """
-    return [todo for todo in todos if todo.action == action]
-
-
 def format_todos_by_action(todos: List[str],
                            original_note_name=None) -> List[str]:
     """Format todos for the new note"""
@@ -402,14 +396,30 @@ def deduplicate_todos(todos: List[Todo]):
     return dedup_todos
 
 
-def reorder_todos(today_todos: List[Todo]):
-    # shame first, next noop, last future
-    shamed_todos = get_todos_by_action(today_todos, Action.SHAME)
-    # for daily notes, noop would be stickied todos
-    noop_todos = get_todos_by_action(today_todos, Action.NOOP)
-    future_todos = get_todos_by_action(today_todos, Action.FUTURE)
+def filter_todos_by_action(todos: List[Todo],
+                           include_action: Action = None,
+                           exclude_action: Action = None):
+    if not include_action and not exclude_action:
+        return todos
+    if include_action:
+        return [todo for todo in todos if todo.action == include_action]
+    if exclude_action:
+        return [todo for todo in todos if todo.action != exclude_action]
 
-    return shamed_todos + noop_todos + future_todos
+
+def reorder_todos(today_todos: List[Todo]):
+    # shame first, next noop, next future, followed by archive
+    shamed_todos = filter_todos_by_action(today_todos,
+                                          include_action=Action.SHAME)
+    # for daily notes, noop would be stickied todos
+    noop_todos = filter_todos_by_action(today_todos,
+                                        include_action=Action.NOOP)
+    archived_todos = filter_todos_by_action(today_todos,
+                                            include_action=Action.ARCHIVE)
+    future_todos = filter_todos_by_action(today_todos,
+                                          include_action=Action.FUTURE)
+
+    return shamed_todos + noop_todos + future_todos + archived_todos
 
 
 def generate_daily_notes(config):
@@ -431,7 +441,9 @@ def generate_daily_notes(config):
         yesterday_todos = reorder_todos(yesterday_todos)
     backlinked_todos = get_backlink_todos(today_note_name)
     # Add todos to tomorrow's note and write it out to a file
-    tmrw_todos_dedup = deduplicate_todos(backlinked_todos + yesterday_todos)
+    tmrw_todos_dedup = deduplicate_todos(
+        backlinked_todos +
+        filter_todos_by_action(yesterday_todos, exclude_action=Action.ARCHIVE))
     formatted_tmrw_todos = format_todos_by_action(tmrw_todos_dedup)
     templatified_note = add_content_to_note_template(today_note_name,
                                                      formatted_tmrw_todos)
@@ -442,7 +454,8 @@ def generate_daily_notes(config):
     # this involves, getting the current todos->combining them with new
     # archived todos -> removing duplicates -> formatting them -> adding to
     # archive template -> write file
-    to_be_archived_todos = get_todos_by_action(yesterday_todos, Action.ARCHIVE)
+    to_be_archived_todos = filter_todos_by_action(
+        yesterday_todos, include_action=Action.ARCHIVE)
     current_archived_todos = get_current_archived_todos(to_be_archived_todos)
     all_archive_todos = current_archived_todos + to_be_archived_todos
     dedup_archived_todos = deduplicate_todos(all_archive_todos)
