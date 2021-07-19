@@ -6,9 +6,12 @@ If start date is in the future, then don't show it on the current daily note
 I will think about it when the time comes
 """
 
+import pathlib
 import datetime
 import re
 import os
+import sys
+import traceback
 from jinja2 import Environment, FileSystemLoader
 from typing import List
 from enum import Enum
@@ -202,11 +205,32 @@ def get_note_name_for(target, timedelta) -> str:
     return get_note_name_from_date(targetDateObject)
 
 
+def get_file_path_from_vault(notename, directory):
+    """Search for a note inside the entire vault
+    """
+    matches = pathlib.Path(directory).glob(f"**/{notename}.md")
+    return list(matches)
+
+
 def get_file_content(notename: str, directory=DN_DIR):
     """get file content from filename, from directory
     """
-    filename = f"{directory}/{notename}.md"
-    return open(filename, "r+").read().rstrip()
+    try:
+        filename = f"{directory}/{notename}.md"
+        filePath = pathlib.Path(filename)
+        if not filePath.is_file():
+            # it's possible the file changes dirs, so search for it
+            discovered_file_path = get_file_path_from_vault(notename, HOME_DIR)
+            if not discovered_file_path:
+                raise FileNotFoundError(
+                    f"Unable to locate file in vault {HOME_DIR}")
+            filename = discovered_file_path[0]
+
+        return open(filename, "r+").read().rstrip()
+    except Exception as e:
+        dlogger.error(f"Unable to get file content: {e}")
+        traceback.print_exc()
+        sys.exit(1)
 
 
 def find_pattern_in_file(notename: str, pattern, dir_path=None):

@@ -1,5 +1,6 @@
 import argparse
 from daily_notes import set_options_and_generate_notes
+import datetime
 
 
 def parse():
@@ -12,7 +13,7 @@ def parse():
     parser.add_argument(
         '--target',
         dest='day_date',
-        default="tomorrow",
+        default=datetime.date.today().isoformat(),
         help=("date for which note is to be created in YYYY-MM-DD format "
               "e.g. 2021-04-01 (default is tomorrow)"))
     parser.add_argument(
