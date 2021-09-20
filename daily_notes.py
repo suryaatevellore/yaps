@@ -13,7 +13,7 @@ import os
 import sys
 import traceback
 from jinja2 import Environment, FileSystemLoader
-from typing import List
+from typing import List, Dict, Union
 from enum import Enum
 import logging
 from quotes import QuotesGetter
@@ -162,7 +162,7 @@ class Todo:
         return f"{self.front_spaces} {self.marker} {self.text})"
 
 
-def get_date_from_note_name(note_name):
+def get_date_from_note_name(note_name: str) -> datetime.datetime:
     """Return day date from note_name
     """
     pattern = DATE_PATTERNS.get(NOTE_FORMAT, None)
@@ -179,12 +179,12 @@ def get_date_from_note_name(note_name):
     return note_date
 
 
-def add_day_delta(note_date, timedelta):
+def add_day_delta(note_date: datetime.datetime, timedelta: int):
     """Add timedelta to note_date"""
     return note_date + datetime.timedelta(timedelta)
 
 
-def get_note_name_from_date(note_date) -> str:
+def get_note_name_from_date(note_date: datetime.datetime) -> str:
     """
     note_date: datetime object
     Get note_name from note_date
@@ -192,8 +192,8 @@ def get_note_name_from_date(note_date) -> str:
     return note_date.strftime(NOTE_FORMAT)
 
 
-def get_note_name_for(target, timedelta) -> str:
-    """Get filenames for today, tomorrow, and yesterday notes
+def get_note_name_for(target: str, timedelta: int) -> str:
+    """Get filenames for target date
     """
 
     match = re.search(r"\d{4}-\d{2}-\d{2}", target)
@@ -422,7 +422,7 @@ def reorder_todos(today_todos: List[Todo]):
     return shamed_todos + noop_todos + future_todos + archived_todos
 
 
-def generate_daily_notes(config):
+def generate_daily_note(config: Dict[str, Union[str, bool]]):
     """Tommorrow note will not have the archived todos
     Workflow
     Get all open todos from today and extract todos which are shamed
@@ -475,6 +475,40 @@ def generate_daily_notes(config):
         write_file(yesterday_note_name, modified_today_note)
 
 
+def generate_daily_notes(config: Dict[str, Union[str, bool]]):
+    """
+    The launchctl facility in macOS has a peculiarity where if the
+    system doesn't run (not logged in) for some days, then only the latest
+    instance of the job is run
+    for example, if I logged into the system on 17th March 2021, and then
+    logged back on 19th March 2021, launchctl would run the daily notes job for
+    19th only, and not for 18th. This becomes a problem because the code would
+    use the daily notes for 18th to generate the ones for 19th, and missing
+    todos for 18th means no todos for 19th.
+    this function will scan the DN dir for the last generate note, and count
+    back from current date upto that date to generate notes from last generated
+    date to today's date if the --upto cli option is set
+    """
+    if not config["up_to_today"]:
+        generate_daily_note(config)
+
+    notes = [
+        f for f in os.listdir(DN_DIR)
+        if os.path.isfile(os.path.join(DN_DIR, f))
+    ]
+    notes.sort()
+    last_created_note_name = notes[-1]
+    last_note_date = get_date_from_note_name(last_created_note_name)
+    config_day_date = datetime.datetime.strptime(config["day_date"],
+                                                 "%Y-%m-%d")
+    difference = (config_day_date - last_note_date).days
+
+    for i in range(difference, -1, -1):
+        config["day_date"] = add_day_delta(config_day_date,
+                                           -i).strftime("%Y-%m-%d")
+        generate_daily_note(config)
+
+
 def _configure_logger():
     dlogger.setLevel(level=logging.INFO)
     log_format = "%(asctime)s:%(name)s:%(levelname)s:%(message)s"
@@ -489,6 +523,7 @@ def set_options_and_generate_notes(args=None):
         "disable_writes": False,
         "only_write_to_archive": True,
         "only_write_to_daily_notes": True,
+        "up_to_today": False,
     }
 
     if args:
@@ -498,6 +533,7 @@ def set_options_and_generate_notes(args=None):
             # other options
             dlogger.setLevel(level=logging.DEBUG)
 
+        config["up_to_today"] = args.up_to_today
         config["day_date"] = args.day_date
         if args and args.no_write_out:
             config["disable_writes"] = True

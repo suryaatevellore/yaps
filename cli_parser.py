@@ -36,6 +36,11 @@ def parse():
         help=
         "The script will only generate the daily_notes file, and ignore archive"
     )
+    parser.add_argument("-upto",
+                        "--up_to_today",
+                        default=False,
+                        action="store_true",
+                        help="Generate all notes upto today")
 
     args = parser.parse_args()
     set_options_and_generate_notes(args)

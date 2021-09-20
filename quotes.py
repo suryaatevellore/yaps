@@ -11,6 +11,9 @@ HOME_DIR = "/Users/sahuja4/Dropbox (Facebook)/Second Brain/Scripts"
 QUOTES_FILE = "quotes.json"
 STOIC_API_GET_URL = "https://stoicquotesapi.com/v1/api/quotes"
 logger = logging.getLogger(__name__)
+logger.setLevel(level=logging.INFO)
+log_format = "%(asctime)s:%(name)s:%(levelname)s:%(message)s"
+logging.basicConfig(format=log_format)
 
 
 class QuotesGetter:
@@ -24,7 +27,9 @@ class QuotesGetter:
             return None
         # pick a random day
         day = random.choice(list(self.quotes.keys()))
-        return random.choice(list(self.quotes[day]))
+        chosen_quote = random.choice(list(self.quotes[day]))
+        logger.info(f"Chosen quote : {chosen_quote}")
+        return chosen_quote
 
     def _get_quotes(self) -> Dict[str, List[Tuple[str, str]]]:
         quotes_file = f"{HOME_DIR}/{QUOTES_FILE}"
