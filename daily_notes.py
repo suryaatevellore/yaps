@@ -14,7 +14,7 @@ import os
 import sys
 import traceback
 from jinja2 import Environment, FileSystemLoader
-from typing import List, Dict, Union
+from typing import List, Dict, Union, IO
 from enum import Enum
 import logging
 from quotes import QuotesGetter
@@ -75,12 +75,6 @@ class State(Enum):
     OPEN = 1
     CLOSED = 2
     MOVED = 3
-
-
-"""Thoughts
-filname should be notename.md
-notename should be the title of the note
-"""
 
 
 class Todo:
@@ -213,8 +207,9 @@ def get_file_path_from_vault(notename, directory):
     return list(matches)
 
 
-def get_file_content(notename: str, directory=DN_DIR):
+def get_file_content(notename: str, directory=DN_DIR) -> IO:
     """get file content from filename, from directory
+
     """
     try:
         filename = f"{directory}/{notename}.md"
@@ -234,7 +229,11 @@ def get_file_content(notename: str, directory=DN_DIR):
         sys.exit(1)
 
 
-def find_pattern_in_file(notename: str, pattern, dir_path=None):
+def find_pattern_in_file(notename: str, pattern, dir_path=None) -> List[Todo]:
+    """
+    Filters the text within the note content to find matching lines against
+    something that looks similar to - [ ] <todo text>
+    """
     matching_lines = []
     note_text = get_file_content(notename, dir_path)
     for line in note_text.split("\n"):
@@ -250,7 +249,7 @@ def find_pattern_in_file(notename: str, pattern, dir_path=None):
     return matching_lines
 
 
-def find_pattern_in_files(FILE_DIR: str, pattern: str):
+def find_pattern_in_files(FILE_DIR: str, pattern: str) -> List[Todo]:
     """find pattern in all files (not subdirectories) in FILE_DIR"""
     matched_patterns = []
     for root, d_name, f_names in os.walk(f"{DN_DIR}"):
@@ -267,7 +266,12 @@ def find_pattern_in_files(FILE_DIR: str, pattern: str):
 
 def format_todos_by_action(todos: List[str],
                            original_note_name=None) -> List[str]:
-    """Format todos for the new note"""
+    """Format todos for the new note
+    This is needed because of the need to have the best possible
+    information infront of me. Tasks that are meant for a future day
+    are not presented today. Spaces are respected so sub-lists order can be
+    maintained
+    """
     formatted_todos = []
     for todo in todos:
         new_todo = f"{todo.front_spaces}- [ ] {todo.upcoming_shame} {todo.text}"
