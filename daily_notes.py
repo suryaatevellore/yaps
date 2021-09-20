@@ -8,6 +8,7 @@ I will think about it when the time comes
 
 import pathlib
 import datetime
+import argparse
 import re
 import os
 import sys
@@ -515,7 +516,13 @@ def _configure_logger():
     logging.basicConfig(format=log_format)
 
 
-def set_options_and_generate_notes(args=None):
+def set_options_and_generate_notes(args: argparse.Namespace):
+    """
+    This function acts as an intermediary between cli options,
+    and the config fed to generate_daily_notes
+    This intermediary method allows me to set logging levels for now
+    and is a pretty ugly way to modify the args
+    """
     _configure_logger()
     today = datetime.date.today()
     config = {
