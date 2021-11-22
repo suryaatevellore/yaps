@@ -12,8 +12,10 @@ QUOTES_FILE = "quotes.json"
 STOIC_API_GET_URL = "https://stoicquotesapi.com/v1/api/quotes"
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
-log_format = "%(asctime)s:%(name)s:%(levelname)s:%(message)s"
-logging.basicConfig(format=log_format)
+logging.basicConfig(
+    format=
+    '%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
+    datefmt='%Y-%m-%d:%H:%M:%S')
 
 
 class QuotesGetter:

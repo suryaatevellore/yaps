@@ -170,7 +170,11 @@ def get_date_from_note_name(note_name: str) -> datetime.datetime:
     else:
         raise DateTextNotFound(
             f"Nothing found inside {note_name} that looks like a  date")
-    note_date = datetime.datetime.strptime(date_text, DATE_FORMAT)
+    try:
+        note_date = datetime.datetime.strptime(date_text, DATE_FORMAT)
+    except Exception as e:
+        print(
+            f"Trouble in converting {date_text} to note_name, Full error {e}")
     return note_date
 
 
@@ -219,12 +223,12 @@ def get_file_content(notename: str, directory=DN_DIR) -> IO:
             discovered_file_path = get_file_path_from_vault(notename, HOME_DIR)
             if not discovered_file_path:
                 raise FileNotFoundError(
-                    f"Unable to locate file in vault {HOME_DIR}")
+                    f"Unable to locate file {filename} in vault {HOME_DIR}")
             filename = discovered_file_path[0]
 
         return open(filename, "r+").read().rstrip()
     except Exception as e:
-        dlogger.error(f"Unable to get file content: {e}")
+        dlogger.error(f"Unable to get file {filename} content: {e}")
         traceback.print_exc()
         sys.exit(1)
 
@@ -496,6 +500,7 @@ def generate_daily_notes(config: Dict[str, Union[str, bool]]):
     """
     if not config["up_to_today"]:
         generate_daily_note(config)
+        return
 
     notes = [
         f for f in os.listdir(DN_DIR)
@@ -507,7 +512,6 @@ def generate_daily_notes(config: Dict[str, Union[str, bool]]):
     config_day_date = datetime.datetime.strptime(config["day_date"],
                                                  "%Y-%m-%d")
     difference = (config_day_date - last_note_date).days
-
     for i in range(difference, -1, -1):
         config["day_date"] = add_day_delta(config_day_date,
                                            -i).strftime("%Y-%m-%d")
@@ -516,8 +520,11 @@ def generate_daily_notes(config: Dict[str, Union[str, bool]]):
 
 def _configure_logger():
     dlogger.setLevel(level=logging.INFO)
-    log_format = "%(asctime)s:%(name)s:%(levelname)s:%(message)s"
-    logging.basicConfig(format=log_format)
+    # log_format = "%(asctime)s:[%(name)s:%(lineno)d] %(levelname)s:%(message)s"
+    logging.basicConfig(
+        format=
+        '%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
+        datefmt='%Y-%m-%d:%H:%M:%S')
 
 
 def set_options_and_generate_notes(args: argparse.Namespace):
