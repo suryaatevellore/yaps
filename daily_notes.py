@@ -102,7 +102,8 @@ class Todo:
         self.action = action
 
     def get_target_note_from_todo_text(self):
-        """The first [[<daily_note>]] which follows the text will be the start_date note name"""
+        """The first [[<daily_note>]] which follows the text will be
+        the start_date note name"""
         start_date_regex = r"\[\[(D\d+)\]\]"
         matches = re.findall(start_date_regex, self.raw_text)
         if matches:
@@ -431,6 +432,11 @@ def reorder_todos(today_todos: List[Todo]):
     return shamed_todos + noop_todos + future_todos + archived_todos
 
 
+def daterange(start_date, end_date):
+    for n in range(int((end_date - start_date).days)):
+        yield start_date + datetime.timedelta(n)
+
+
 def generate_daily_note(config: Dict[str, Union[str, bool]]):
     """Tommorrow note will not have the archived todos
     Workflow
@@ -441,8 +447,10 @@ def generate_daily_note(config: Dict[str, Union[str, bool]]):
     and write archived notes to Archive note
     """
 
-    today_note_name = get_note_name_for(config["day_date"], timedelta=0)
-    yesterday_note_name = get_note_name_for(config["day_date"], timedelta=-1)
+    today_note_name = get_note_name_for(config["current_datetime"],
+                                        timedelta=0)
+    yesterday_note_name = get_note_name_for(config["current_datetime"],
+                                            timedelta=-1)
 
     yesterday_todos = get_open_todos(yesterday_note_name)
     # reorder by what feels best
@@ -467,6 +475,10 @@ def generate_daily_note(config: Dict[str, Union[str, bool]]):
         yesterday_todos, include_action=Action.ARCHIVE)
     current_archived_todos = get_current_archived_todos(to_be_archived_todos)
     all_archive_todos = current_archived_todos + to_be_archived_todos
+    dlogger.debug(
+        f"[Archive] Current todos={len(current_archived_todos)},total todos={len(all_archive_todos)}"
+    )
+    print(to_be_archived_todos)
     dedup_archived_todos = deduplicate_todos(all_archive_todos)
     dedup_archived_todos_formatted = format_todos_by_action(
         dedup_archived_todos, yesterday_note_name)
@@ -494,27 +506,19 @@ def generate_daily_notes(config: Dict[str, Union[str, bool]]):
     19th only, and not for 18th. This becomes a problem because the code would
     use the daily notes for 18th to generate the ones for 19th, and missing
     todos for 18th means no todos for 19th.
-    this function will scan the DN dir for the last generate note, and count
-    back from current date upto that date to generate notes from last generated
-    date to today's date if the --upto cli option is set
+    Specified two config options -s and -d, which let the user specify the start
+    and end dates as a range to generate notes for
     """
-    if not config["up_to_today"]:
-        generate_daily_note(config)
-        return
+    start_date = datetime.datetime.strptime(config["start_datetime"],
+                                            "%Y-%m-%d")
+    end_date = datetime.datetime.strptime(config["end_datetime"], "%Y-%m-%d")
 
-    notes = [
-        f for f in os.listdir(DN_DIR)
-        if os.path.isfile(os.path.join(DN_DIR, f))
-    ]
-    notes.sort()
-    last_created_note_name = notes[-1]
-    last_note_date = get_date_from_note_name(last_created_note_name)
-    config_day_date = datetime.datetime.strptime(config["day_date"],
-                                                 "%Y-%m-%d")
-    difference = (config_day_date - last_note_date).days
-    for i in range(difference, -1, -1):
-        config["day_date"] = add_day_delta(config_day_date,
-                                           -i).strftime("%Y-%m-%d")
+    # ranging over these dates to generate notes and ranges are exclusive
+    if start_date != end_date:
+        start_date += datetime.timedelta(-1)
+    end_date += datetime.timedelta(1)
+    for single_date in daterange(start_date, end_date):
+        config["current_datetime"] = single_date.strftime("%Y-%m-%d")
         generate_daily_note(config)
 
 
@@ -523,7 +527,7 @@ def _configure_logger():
     # log_format = "%(asctime)s:[%(name)s:%(lineno)d] %(levelname)s:%(message)s"
     logging.basicConfig(
         format=
-        '%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
+        '%(asctime)s,%(msecs)d %(levelname)s:[%(filename)s:%(lineno)d] %(message)s',
         datefmt='%Y-%m-%d:%H:%M:%S')
 
 
@@ -537,11 +541,12 @@ def set_options_and_generate_notes(args: argparse.Namespace):
     _configure_logger()
     today = datetime.date.today()
     config = {
-        "day_date": today.isoformat(),
+        "start_datetime": args.start_day_date,
+        "end_datetime": args.end_day_date,
+        "current_daytime": None,
         "disable_writes": False,
         "only_write_to_archive": True,
         "only_write_to_daily_notes": True,
-        "up_to_today": False,
     }
 
     if args:
@@ -551,8 +556,6 @@ def set_options_and_generate_notes(args: argparse.Namespace):
             # other options
             dlogger.setLevel(level=logging.DEBUG)
 
-        config["up_to_today"] = args.up_to_today
-        config["day_date"] = args.day_date
         if args and args.no_write_out:
             config["disable_writes"] = True
         elif args and args.only_write_to_archive:

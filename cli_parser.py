@@ -11,11 +11,18 @@ def parse():
                         action="store_true",
                         help="start debug level logging")
     parser.add_argument(
-        '--target',
-        dest='day_date',
+        '-d',
+        dest='end_day_date',
         default=datetime.date.today().isoformat(),
         help=("date for which note is to be created in YYYY-MM-DD format "
               "e.g. 2021-04-01 (default is tomorrow)"))
+    parser.add_argument(
+        '-s',
+        dest='start_day_date',
+        default=datetime.date.today().isoformat(),
+        help=(
+            "this note is to be used in conjunction with -d option to specify "
+            "a range of days for generating notes"))
     parser.add_argument(
         "-n",
         "--no-write-out",
@@ -30,17 +37,12 @@ def parse():
         "The script will only generate the new archive file, and ignore daily_notes"
     )
     parser.add_argument(
-        "-d",
+        "-donly",
         "--only-write-to-daily-notes",
         action="store_true",
         help=
         "The script will only generate the daily_notes file, and ignore archive"
     )
-    parser.add_argument("-upto",
-                        "--up_to_today",
-                        default=False,
-                        action="store_true",
-                        help="Generate all notes upto today")
 
     args = parser.parse_args()
     set_options_and_generate_notes(args)
